@@ -1,0 +1,66 @@
+name: 编译 PYD (老王加密版)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # 允许手动点按钮触发
+
+jobs:
+  build_pyd:
+    runs-on: windows-latest # 使用 Windows 环境编译
+    strategy:
+      matrix:
+        # 这里指定要编译的 Python 版本，ComfyUI 常用这三个
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置 Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: 安装编译工具
+      run: |
+        python -m pip install --upgrade pip
+        pip install cython setuptools wheel
+
+    - name: 开始编译 (生成 .pyd)
+      run: |
+        python setup.py build_ext --inplace
+
+    - name: 清理垃圾 (删除 .c, build 文件夹, 原 .py 文件)
+      shell: pwsh
+      run: |
+        # 删除生成的 C 源码文件
+        Remove-Item -Path "*.c" -ErrorAction SilentlyContinue
+        # 删除 build 临时文件夹
+        Remove-Item -Path "build" -Recurse -ErrorAction SilentlyContinue
+        # (可选) 如果你想在发布包里删掉源码，保留下面这行；如果是测试，先注释掉
+        # Remove-Item -Path "Simple_Banana_Node.py" -ErrorAction SilentlyContinue
+
+    - name: 整理文件名 (重命名为 Simple_Banana_Node.pyd)
+      shell: pwsh
+      run: |
+        # 编译出来的名字通常是 Simple_Banana_Node.cp310-win_amd64.pyd，我们要改成标准名并归档
+        # 创建存放结果的文件夹
+        New-Item -ItemType Directory -Force -Path "dist_pyd"
+        
+        # 移动并改名
+        Get-ChildItem -Filter "*.pyd" | ForEach-Object {
+          $newName = $_.Name -replace "\.cp\d+-win_amd64", ""
+          Copy-Item $_.FullName -Destination "dist_pyd/$newName"
+        }
+        
+        # 验证一下
+        Write-Host "编译结果："
+        Get-ChildItem "dist_pyd"
+
+    - name: 上传结果
+      uses: actions/upload-artifact@v4
+      with:
+        # 上传后的压缩包名字，比如 pyd-files-3.10
+        name: banana-pyd-python${{ matrix.python-version }}
+        path: dist_pyd/*.pyd
